@@ -1,3 +1,4 @@
+#include <iostream>
 #include<thread>
 #include<queue>
 #include<mutex>
@@ -37,10 +38,20 @@ private:
     std::mutex m_mutex;
 };
 
-
-
 class Thread_pool
 {
+public:
+    Thread_pool(int thread_num = 4);
+    Thread_pool(const Thread_pool &) = delete;
+    Thread_pool(Thread_pool &&) = delete;
+    Thread_pool &operator=(const Thread_pool &) = delete;
+    Thread_pool &operator=(Thread_pool &&) = delete;
+
+    void init();
+    void shutdown();
+
+    template <typename F, typename... Args>
+    auto submit(F &&f, Args &&...args) -> std::future<decltype(f(args...))>;
 private:
     class Worker{
     private:
@@ -52,48 +63,30 @@ private:
         void operator() ();
     };
     bool is_active;
-    int thread_num = 1;
+    int thread_num;
     std::mutex data_lock;
     Safe_queue<std::function<void()>> m_queue;
     std::vector<std::thread> m_threads;
     std::mutex thread_lock;
     std::condition_variable m_conditional_lock;
-
-public:
-
-    Thread_pool(int thread_num = 4);
-    Thread_pool(const Thread_pool &) = delete;
-    Thread_pool(Thread_pool &&) = delete;
-    Thread_pool &operator=(const Thread_pool &) = delete;
-    Thread_pool &operator=(Thread_pool &&) = delete;
-
-    void init();
-    void shutdown();
-    template <typename F, typename... Args>
-    auto submit(F &&f, Args &&...args) -> std::future<decltype(f(args...))>
-    {
-        // Create a function with bounded parameter ready to execute
-        std::function<decltype(f(args...))()> func = std::bind(std::forward<F>(f), std::forward<Args>(args)...); // 连接函数和参数定义，特殊函数类型，避免左右值错误​
-        // Encapsulate it into a shared pointer in order to be able to copy construct
-        auto task_ptr = std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
-
-        // Warp packaged task into void function
-        std::function<void()> warpper_func = [task_ptr]()
-        {
-            (*task_ptr)();
-        };
-
-        // 队列通用安全封包函数，并压入安全队列
-        m_queue.enqueue(warpper_func);
-
-        // 唤醒一个等待中的线程
-        m_conditional_lock.notify_one();
-
-        // 返回先前注册的任务指针
-        return task_ptr->get_future();
-    }
-
 };
 
+template <typename F, typename... Args>
+auto Thread_pool::submit(F &&f, Args &&...args) -> std::future<decltype(f(args...))> {
+    // 连接函数和参数定义，特殊函数类型，避免左右值错误​
+    std::function<decltype(f(args...))()> func = std::bind(std::forward<F>(f), std::forward<Args>(args)...); 
+    auto task_ptr = std::make_shared<std::packaged_task<decltype(f(args...))()>>(func);
 
+    std::function<void()> warpper_func = [task_ptr]()
+    {
+        (*task_ptr)();
+    };
+    // 队列通用安全封包函数，并压入安全队列
+    m_queue.enqueue(warpper_func);
 
+    // 唤醒一个等待中的线程
+    m_conditional_lock.notify_one();
+
+    // 返回先前注册的任务指针
+    return task_ptr->get_future();
+}

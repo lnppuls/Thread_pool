@@ -1,6 +1,6 @@
 #include "thread_pool.h"
-Thread_pool::Thread_pool(int thread_num) : m_threads(std::vector<std::thread>(thread_num))
-{   
+Thread_pool::Thread_pool(int thread_num) : thread_num(thread_num)
+{  
 }
 
 Thread_pool::Worker::Worker(int id, Thread_pool *this_pool) : _id(id) , this_pool(this_pool)
@@ -14,7 +14,7 @@ Thread_pool::Worker::~Worker()
 void Thread_pool::Worker::operator() ()
 {
     std::function<void()> func; // 定义基础函数类func
-    bool dequeued; // 是否正在取出队列中元素
+    bool dequeued = false; // 是否取出成功
     while (this_pool->is_active)
     {
         {
@@ -34,8 +34,9 @@ void Thread_pool::Worker::operator() ()
 void Thread_pool::init()
 {
     for(int i = 0;i < thread_num;i++){
-        m_threads[i] = std::thread(Worker(i,this));
+        m_threads.emplace_back(std::thread(Worker(i,this)));
     }
+    this->is_active = true;
 }
 
 void Thread_pool::shutdown()
